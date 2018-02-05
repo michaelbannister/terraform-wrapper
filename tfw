@@ -11,25 +11,37 @@ case $(uname) in
 esac
 
 if [ "${TFVERSION:-x}" = "x" ];then
-    TFVERSION="$(cat $BASE/terraform.version)"
+    TFVERSION="$(cat ${BASE}/terraform.version)"
 fi
+
+TFW_HOME=${TFW_HONE:-$HOME/.tfw}
+mkdir -p ${TFW_HOME}
+
+if [[ "$(terraform --version | head -n1)" == "Terraform v${TFVERSION}" ]]; then
+    echo "Using global terraform ${TFVERSION} at $(which terraform)"
+    exec terraform $@
+fi
+
+# else check TFW cache
+TFW_VERSION_DIR=${TFW_HOME}/${TFVERSION}
+TFW_TERRAFORM_EXE=${TFW_VERSION_DIR}/terraform
+
+# if we find it in TFW home, use that
+if [[ -x "${TFW_TERRAFORM_EXE}" && $(${TFW_TERRAFORM_EXE} --version | head -n1) == "Terraform v${TFVERSION}" ]]; then
+    exec "${TFW_TERRAFORM_EXE}" $@
+fi
+
+# otherwise, clear up any existing mess and download the required version
+rm -rf ${TFW_VERSION_DIR}
+mkdir -p ${TFW_VERSION_DIR}
 
 URL=https://releases.hashicorp.com/terraform/${TFVERSION}/terraform_${TFVERSION}_${osfamily}_amd64.zip
-ZIPFILE=$BASE/${URL##*/}
+ZIPFILE=${TFW_VERSION_DIR}/${URL##*/}
 
-if [ -x $BASE/terraform ];then
-    CURVER=$($BASE/terraform version|sed -ne 's/^Terraform v\(.*\)/\1/p')
-    if ! [ $CURVER = $TFVERSION ];then 
-        echo "Updating terraform because of version mismatch - current=$CURVER, desired=$TFVERSION"
-        rm -f $BASE/terraform
-    fi
-fi
+echo "Downloading Terraform $TFVERSION"
+curl --silent --show-error --retry 1 --max-time 60 -o "$ZIPFILE" ${URL}
+unzip ${ZIPFILE} -d ${TFW_VERSION_DIR}
+rm  -f ${ZIPFILE}
+chmod +x ${TFW_TERRAFORM_EXE}
 
-if ! [ -x $BASE/terraform ];then
-	echo "Downloading terraform $TFVERSION"
-	curl -o$ZIPFILE $URL
-    unzip $ZIPFILE -d $BASE
-	rm  -f $ZIPFILE
-fi
-
-exec $BASE/terraform $@
+exec ${TFW_TERRAFORM_EXE} $@
